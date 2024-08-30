@@ -1,32 +1,35 @@
-import requests
-from bs4 import BeautifulSoup
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+import time
 import json
 from concurrent.futures import ThreadPoolExecutor
-import time
 import random
 
-headers = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-}
-
-def get_job_details(url):
+def get_job_details(driver, url):
     try:
-        response = requests.get(url, headers=headers)
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        company = soup.find('div', class_='boss-info-attr').text.strip()
-        company_info = soup.find('div', class_='sider-company').find_all('p')
+        driver.get(url)
+        time.sleep(2)  # 等待页面加载和JavaScript渲染
+            
+        # 使用显式等待确保元素加载
+        wait = WebDriverWait(driver, 10)
+        company_element = wait.until(EC.presence_of_element_located((By.CLASS_NAME, 'boss-info-attr')))
+        company = company_element.text.strip()
+
+        company_info = driver.find_elements(By.CLASS_NAME, 'sider-company').find_elements(By.TAG_NAME, 'p')
         size = company_info[1].text.strip()
         industry = company_info[2].text.strip()
         
-        job_primary = soup.find('div', class_='job-primary')
-        salary = job_primary.find('span', class_='salary').text.strip()
-        job_info = job_primary.find('div', class_='info-primary').find_all('p')
-        city = job_primary.find('a', class_='text-city').text.strip()
-        experience = job_primary.find('span', class_='text-experience').text.strip()
-        education = job_primary.find('span', class_='text-degree').text.strip()
+        job_primary = driver.find_element(By.CLASS_NAME, 'job-primary')
+        salary = job_primary.find_element(By.CLASS_NAME, 'salary').text.strip()
+        job_info = job_primary.find_element(By.CLASS_NAME, 'info-primary').find_elements(By.TAG_NAME, 'p')
+        city = job_primary.find_element(By.CLASS_NAME, 'text-city').text.strip()
+        experience = job_primary.find_element(By.CLASS_NAME, 'text-experience').text.strip()
+        education = job_primary.find_element(By.CLASS_NAME, 'text-degree').text.strip()
         
-        description = soup.find('div', class_='job-sec-text').text.strip()
+        description = driver.find_element(By.CLASS_NAME, 'job-sec-text').text.strip()
 
         print(f"Scraped {company} - {city} - {salary}")
         
@@ -49,41 +52,47 @@ def scrape_jobs(keyword):
     jobs = []
     page = 1
     
+    options = Options()
+    # options.add_argument('--headless')  # 无头模式
+    options.add_argument('--disable-gpu')
+    driver = webdriver.Chrome(options=options)
+    
     while True:
+        if page == 2:
+            break  # 当 page 等于 2 时退出循环
+
         params = {
             'query': keyword,
-            'city': '100010000',  # 确保这是正确的城市代码
+            'city': 100010000,  # 确保这是正确的城市代码
             'page': page
         }
-        response = requests.get(base_url, params=params, headers=headers, timeout=10)
-        if response.status_code!= 200:
-            print(f"Error fetching page {page} for {keyword}: {response.status_code}")
+        query_string = "&".join([f"{key}={value}" for key, value in params.items()])
+        print(f"{query_string} - {page}")
+        driver.get(f"{base_url}?{query_string}")
+        time.sleep(2)  # 等待页面加载和JavaScript渲染
+        
+        job_cards = driver.find_elements(By.CLASS_NAME, 'job-card-wrapper')
+        
+        print(f"Scraping {len(job_cards)} jobs...")
+        if not job_cards:
             break
         
-        print(response.text)
-        soup = BeautifulSoup(response.text, 'html.parser')
-        job_list = soup.find_all('li', class_='job-card-wrapper')
-        
-        # print(f"{len(job_list)} jobs found on page {page} for {keyword} ")
-        if not job_list:
-            break
-        
-        job_urls = ['https://www.zhipin.com' + job.find('a')['href'] for job in job_list]
-
+        job_urls = [job.find_element(By.TAG_NAME, 'a').get_attribute('href') for job in job_cards]
         
         with ThreadPoolExecutor(max_workers=5) as executor:
-            job_details = list(executor.map(get_job_details, job_urls))
+            job_details = list(executor.map(lambda url: get_job_details(driver, url), job_urls))
         
         jobs.extend([job for job in job_details if job])
         page += 1
         
-        time.sleep(random.uniform(1, 3))  # 随机延迟1-3秒
+        time.sleep(random.uniform(1, 4))  # 随机延迟1-4秒
     
+    driver.quit()
     return jobs
 
 def main():
     keyword = "前端开发工程师"
-    jobs = scrape_jobs(keyword) 
+    jobs = scrape_jobs(keyword)
     
     # 输出为JSON
     with open('frontend_jobs.json', 'w', encoding='utf-8') as f:
