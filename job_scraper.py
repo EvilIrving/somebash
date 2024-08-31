@@ -1,102 +1,78 @@
 from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
 import time
 import json
-from concurrent.futures import ThreadPoolExecutor
-import random
 
-def get_job_details(driver, url):
-    try:
+def get_job_descriptions(base_url, query, city, pages=10):
+    service = Service(ChromeDriverManager().install())
+    driver = webdriver.Chrome(service=service)
+    jobs_data = []
+
+    for page in range(1, pages + 1):
+        url = f"{base_url}?query={query}&city={city}&page={page}"
         driver.get(url)
-        time.sleep(2)  # 等待页面加载和JavaScript渲染
+        
+        if page < 2:
+            time.sleep(35)  # 等待页面加载
+        else:
+            time.sleep(5)  # 等待页面加载
+
+        job_cards = driver.find_elements(By.CSS_SELECTOR, '.job-card-wrapper')
+        for job in job_cards:
+            job_data = {}
+            job_data['job_title'] = job.find_element(By.CSS_SELECTOR, '.job-title .job-name').text
+            job_data['area'] = job.find_element(By.CSS_SELECTOR, '.job-area-wrapper .job-area').text
+            job_data['salary'] = job.find_element(By.CSS_SELECTOR, '.salary').text.strip() if job.find_elements(By.CSS_SELECTOR, '.salary') else "Not specified"
             
-        # 使用显式等待确保元素加载
-        wait = WebDriverWait(driver, 10)
-        company_element = wait.until(EC.presence_of_element_located((By.CLASS_NAME, 'boss-info-attr')))
-        company = company_element.text.strip()
+            job_data['experience'] = job.find_element(By.CSS_SELECTOR, '.job-info .tag-list li:nth-of-type(1)').text if job.find_elements(By.CSS_SELECTOR, '.job-info .tag-list li:nth-of-type(1)') else "Not specified"
+            job_data['education'] = job.find_element(By.CSS_SELECTOR, '.job-info .tag-list li:nth-of-type(2)').text if job.find_elements(By.CSS_SELECTOR, '.job-info .tag-list li:nth-of-type(2)') else "Not specified"
+            
+            job_data['company_name'] = job.find_element(By.CSS_SELECTOR, '.company-name a').text.strip() if job.find_elements(By.CSS_SELECTOR, '.company-name a') else "Not specified"
+          
+            job_data['company_industry'] = job.find_element(By.CSS_SELECTOR, '.company-tag-list li:nth-of-type(1)').text.strip() if job.find_elements(By.CSS_SELECTOR, '.company-tag-list li:nth-of-type(1)') else "Not specified"
+            job_data['funding_status'] = job.find_element(By.CSS_SELECTOR, '.company-tag-list li:nth-of-type(2)').text.strip() if job.find_elements(By.CSS_SELECTOR, '.company-tag-list li:nth-of-type(2)') else "Not specified"
+            job_data['company_size'] = job.find_element(By.CSS_SELECTOR, '.company-tag-list li:nth-of-type(3)').text.strip() if job.find_elements(By.CSS_SELECTOR, '.company-tag-list li:nth-of-type(3)') else "Not specified"
+            job_data['company_logo_url'] = job.find_element(By.CSS_SELECTOR, '.company-logo img').get_attribute('src') if job.find_elements(By.CSS_SELECTOR, '.company-logo img') else "Not specified"  
+            
+            job_data['tech_keywords'] = ','.join([li.text for li in job.find_elements(By.CSS_SELECTOR, '.job-card-footer .tag-list li')])
+            job_data['benefits'] = job.find_element(By.CSS_SELECTOR, '.info-desc').text.strip() if job.find_elements(By.CSS_SELECTOR, '.info-desc') else "Not specified"
 
-        company_info = driver.find_elements(By.CLASS_NAME, 'sider-company').find_elements(By.TAG_NAME, 'p')
-        size = company_info[1].text.strip()
-        industry = company_info[2].text.strip()
-        
-        job_primary = driver.find_element(By.CLASS_NAME, 'job-primary')
-        salary = job_primary.find_element(By.CLASS_NAME, 'salary').text.strip()
-        job_info = job_primary.find_element(By.CLASS_NAME, 'info-primary').find_elements(By.TAG_NAME, 'p')
-        city = job_primary.find_element(By.CLASS_NAME, 'text-city').text.strip()
-        experience = job_primary.find_element(By.CLASS_NAME, 'text-experience').text.strip()
-        education = job_primary.find_element(By.CLASS_NAME, 'text-degree').text.strip()
-        
-        description = driver.find_element(By.CLASS_NAME, 'job-sec-text').text.strip()
+            hover = ActionChains(driver).move_to_element(job.find_element(By.CSS_SELECTOR, '.job-title'))
+            hover.perform()
+            time.sleep(2)  # 等待悬停效果出现
 
-        print(f"Scraped {company} - {city} - {salary}")
-        
-        return {
-            'company': company,
-            'size': size,
-            'industry': industry,
-            'salary': salary,
-            'experience': experience,
-            'education': education,
-            'city': city,
-            'description': description
-        }
-    except Exception as e:
-        print(f"Error processing {url}: {str(e)}")
-        return None
+            try:
+                description_element = job.find_element(By.CSS_SELECTOR, '.job-detail-body .desc')
+                job_data['description'] = description_element.text
+            except:
+                job_data['description'] = "No description available"
 
-def scrape_jobs(keyword):
-    base_url = 'https://www.zhipin.com/web/geek/job'
-    jobs = []
-    page = 1
-    
-    options = Options()
-    # options.add_argument('--headless')  # 无头模式
-    options.add_argument('--disable-gpu')
-    driver = webdriver.Chrome(options=options)
-    
-    while True:
-        if page == 2:
-            break  # 当 page 等于 2 时退出循环
+         
+            jobs_data.append(job_data)
 
-        params = {
-            'query': keyword,
-            'city': 100010000,  # 确保这是正确的城市代码
-            'page': page
-        }
-        query_string = "&".join([f"{key}={value}" for key, value in params.items()])
-        print(f"{query_string} - {page}")
-        driver.get(f"{base_url}?{query_string}")
-        time.sleep(2)  # 等待页面加载和JavaScript渲染
-        
-        job_cards = driver.find_elements(By.CLASS_NAME, 'job-card-wrapper')
-        
-        print(f"Scraping {len(job_cards)} jobs...")
-        if not job_cards:
+        # 尝试点击下一页
+        try:
+            next_button = driver.find_element(By.CSS_SELECTOR, '.options-pages a:last-child')
+            next_button.click()
+            time.sleep(5)  # 等待页面加载
+        except Exception as e:
+            print(f"Error navigating to next page: {e}")
             break
-        
-        job_urls = [job.find_element(By.TAG_NAME, 'a').get_attribute('href') for job in job_cards]
-        
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            job_details = list(executor.map(lambda url: get_job_details(driver, url), job_urls))
-        
-        jobs.extend([job for job in job_details if job])
-        page += 1
-        
-        time.sleep(random.uniform(1, 4))  # 随机延迟1-4秒
-    
+
     driver.quit()
-    return jobs
+    return jobs_data
 
-def main():
-    keyword = "前端开发工程师"
-    jobs = scrape_jobs(keyword)
-    
-    # 输出为JSON
-    with open('frontend_jobs.json', 'w', encoding='utf-8') as f:
-        json.dump(jobs, f, ensure_ascii=False, indent=2)
+def save_to_json(data, filename='jobs_data.json'):
+    with open(filename, 'w', encoding='utf-8') as json_file:
+        json.dump(data, json_file, ensure_ascii=False, indent=4)
 
-if __name__ == "__main__":
-    main()
+base_url = 'https://www.zhipin.com/web/geek/job' 
+query = '前端开发工程师'
+city = '100010000'
+jobs_data = get_job_descriptions(base_url, query, city) 
+save_to_json(jobs_data)
