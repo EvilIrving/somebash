@@ -156,11 +156,13 @@ bot.start((ctx) => ctx.reply("Welcome to Niche Hunt!"));
 bot.command("leaderboard", async (ctx) => {
   try {
     const products = await fetchProductHuntData();
+    console.log(ctx, "ctx");
+
     for (const product of products) {
       await product.fetchOgImageUrl();
       const message = generateProductHTML(product);
-      await bot.telegram.sendMessage("1789629178", message, {
-        parse_mode: "Markdown",
+      await bot.telegram.sendMessage("-1002227026093", message, {
+        parse_mode: "HTML",
       });
     }
   } catch (error) {
@@ -175,8 +177,16 @@ async function main() {
     for (const product of products) {
       await product.fetchOgImageUrl();
       const message = generateProductHTML(product);
-      await bot.telegram.sendMessage("1789629178", message, {
+      await bot.telegram.sendMessage("-1002227026093", message, {
         parse_mode: "HTML",
+        disable_notification: false,
+        link_preview_options: {
+          is_disabled: false,
+          url: product.website,
+          prefer_small_media: false,
+          prefer_large_media: false,
+          show_above_text: true,
+        },
       });
     }
   } catch (error) {
